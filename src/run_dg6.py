@@ -71,6 +71,7 @@ for src in INPUTS:
         dump_to_disk=True,
         debug=True,
     )
+    os.environ["DG_SOURCE"] = src
     rec = {"source": src, "stem": stem, "outdir": outdir, "client": CLIENT_KIND,
            "in_bytes": os.path.getsize(src), "contract": CONTRACT, "export": EXPORT}
     t0 = time.time()

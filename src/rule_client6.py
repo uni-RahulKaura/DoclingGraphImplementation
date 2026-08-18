@@ -127,30 +127,61 @@ def _chunk_bodies(prompt: str):
     return out
 
 
+def _source_clause_titles():
+    """Clause titles taken from the ORIGINAL Markdown, used as an allowlist.
+
+    Some clause headings survive into DocLang glued to the paragraph that follows
+    them, with no delimiter to split on -- e.g.
+    "SIGNATURES IN WITNESS WHEREOF the Parties have executed this SOW ..." and
+    "Telephony Solution The planned telephony solution ...". No rule over the DocLang
+    alone can recover those boundaries, so the numbering in the source Markdown is
+    used instead: `^N. Title` lines give an allowlist, and any element starting with
+    one of those titles is split at that point.
+
+    Set DG_SOURCE to the source path to enable this. Without it the allowlist is empty
+    and behaviour is unchanged.
+    """
+    path = os.environ.get("DG_SOURCE")
+    if not path or not os.path.exists(path):
+        return []
+    md = open(path, encoding="utf-8", errors="replace").read()
+    titles = set()
+    for m in re.finditer(
+            r"(?m)^\s*(?:\*\*)?\d{1,2}\.\s+([A-Z][A-Za-z0-9 &/\-,']{3,70}?)(?:\*\*)?\s*:?\s*$", md):
+        t = m.group(1).strip()
+        if t:
+            titles.add(t)
+    return sorted(titles, key=len, reverse=True)
+
+
 def _is_clause_heading(el) -> bool:
-    """True for a numbered clause heading that docling emitted as a list, not a heading.
+    """True for a clause title that docling emitted as a list rather than a heading.
 
-    docling renders contract clause titles such as `1. INTRODUCTION AND OVERVIEW`
-    as `<list class="ordered">` rather than `<heading>`, so a splitter keying on
-    `<heading>` alone silently loses much of the clause structure of a real SOW.
+    docling renders numbered contract clauses as `<list class="ordered">` with an
+    `<ldiv/>` marker, so a splitter keying on `<heading>` alone loses them.
 
-    The test is "short and shouty", NOT "has a <bold> child". Requiring the bold
-    wrapper was measured against the Accenture SOW and found 4 of them while
-    missing `TIMELINE` and `ROLES AND RESPONSIBILITIES`, which carry exactly the
-    same semantic role but arrive as bare all-caps list text. Length plus an
-    uppercase ratio catches both and still rejects the long mixed-case body
-    paragraphs (`SIGNATURES IN WITNESS WHEREOF the Parties have executed ...`,
-    126 chars at 0.30 uppercase).
+    An earlier version of this required the text to be >70% uppercase. That was the
+    wrong discriminator and it silently dropped real sections: on the Accenture SOW it
+    caught `TIMELINE` and `ROLES AND RESPONSIBILITIES` but threw away `5. Project
+    Location` and `6. Key Project Considerations`, which are Title Case. Both are
+    genuine numbered clauses in the source.
+
+    The rule is now length and shape, not case: a short titled line that is not a
+    sentence. This deliberately errs toward including too much -- it will also pick up
+    a handful of defined terms and captions -- because a section missing from the index
+    is worse than a section that should not be there. `heading_confidence` on each
+    section records which are real headings and which were inferred this way.
     """
     if el.tag not in ("list", "bold"):
         return False
-    txt = _text_of(el)
-    if not (3 <= len(txt) <= 120):
+    t = _text_of(el).strip()
+    if not (3 <= len(t) <= 80) or len(t.split()) > 10:
         return False
-    letters = [c for c in txt if c.isalpha()]
-    if not letters:
-        return False
-    return sum(c.isupper() for c in letters) / len(letters) > 0.7
+    if t.endswith(".") and not re.match(r"^\d+\.$", t):
+        return False          # a full sentence, not a title
+    if re.match(r"^\d+[-/]", t):
+        return False          # a date or data row, e.g. "10-Feb-20 9-March-20 ..."
+    return t[0].isupper() or t[0].isdigit()
 
 
 class DocLangRuleClient:
@@ -366,24 +397,36 @@ class DocLangRuleClient:
 
     def _sections(self, units, st) -> List[Dict[str, Any]]:
         """Split the unit stream on <heading> and on bold ordered-list clause titles."""
+        allow = _source_clause_titles()
         idx = []
         for i, u in enumerate(units):
-            if u.tag == "heading" or _is_clause_heading(u):
-                idx.append((i, _text_of(u)))
+            txt = _text_of(u)
+            if u.tag == "heading":
+                idx.append((i, txt, "heading"))
+            elif _is_clause_heading(u):
+                idx.append((i, txt, "inferred clause title"))
+            else:
+                # a clause title glued to the front of its own paragraph
+                for t in allow:
+                    if txt.startswith(t) and len(txt) > len(t):
+                        idx.append((i, t, "title recovered from source numbering"))
+                        break
+        st["allowlist_titles"] = len(allow)
         st["heading_units"] = sum(1 for u in units if u.tag == "heading")
         st["clause_heading_units"] = sum(1 for u in units if _is_clause_heading(u))
         st["section_boundaries"] = len(idx)
         if not idx:
             # Floor case: a contract with no headings at all (micro_crystal).
-            idx = [(0, "WHOLE DOCUMENT")]
+            idx = [(0, "WHOLE DOCUMENT", "whole document")]
             st["no_headings"] = True
 
         secs = []
-        for j, (pos, title) in enumerate(idx[:MAX_SECTIONS]):
+        for j, (pos, title, src) in enumerate(idx[:MAX_SECTIONS]):
             end = idx[j + 1][0] if j + 1 < len(idx) else len(units)
             chunk = " ".join(_text_of(units[k]) for k in range(pos, end))
             secs.append({
                 "heading": (title or "Unnamed")[:200],
+                "heading_source": src,
                 "summary": chunk[:160] or None,
                 "permissions": self._perms(chunk),
                 "obligations": self._obls(chunk),

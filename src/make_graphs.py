@@ -59,7 +59,12 @@ ROW, INDENT, PAD = 18, 24, 14
 
 
 def load(stem):
-    d = sorted(glob.glob("out6/%s_direct_csv/*/" % stem))[-1]
+    # accenture_allsections is the re-run that captures every section, including the
+    # Title-Case clause titles the first pass dropped and the two headings docling
+    # glued onto their own paragraphs. 44 sections instead of 30.
+    pat = ("out6/accenture_allsections/*/" if stem == "accenture"
+           else "out6/%s_direct_csv/*/" % stem)
+    d = sorted(glob.glob(pat))[-1]
     nodes = {r["id"]: r for r in csv.DictReader(open(d + "docling_graph/nodes.csv"))}
     edges = [(r["source"], r["target"], r["label"])
              for r in csv.DictReader(open(d + "docling_graph/edges.csv"))]

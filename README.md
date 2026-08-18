@@ -144,8 +144,40 @@ would have made silently and plausibly.
 **Numbered clause headings arrive as lists, not headings.** docling renders
 `1. INTRODUCTION AND OVERVIEW` as
 `<list class="ordered"><ldiv/><bold>…</bold></list>`. Keying on `<heading>` alone found 24
-sections in our largest document and missed two more that carry the same role as bare
-all-caps list text. Splitting on both forms found **30**.
+sections in our largest document and missed everything numbered.
+
+Getting all of them took three passes, and the two wrong turns are worth recording, because
+each silently dropped real sections:
+
+| pass | rule | sections found |
+|---|---|---|
+| 1 | `<heading>` elements only | 24 |
+| 2 | plus `<list>` items that are **>70% uppercase** | 30 |
+| 3 | plus Title-Case titles, plus titles recovered from the source numbering | **44** |
+
+**Why the uppercase rule was wrong.** It caught `4. TIMELINE` and
+`8. ROLES AND RESPONSIBILITIES` but discarded `5. Project Location` and
+`6. Key Project Considerations`, which are Title Case and just as real. Case was never the
+signal; length and shape are. The rule is now "a short titled line that is not a sentence",
+which deliberately over-includes — it also picks up a few defined terms and captions,
+because a section missing from the index is worse than one that should not be there.
+`heading_source` on every section records whether it came from a real heading or was
+inferred.
+
+**Two headings could not be recovered from DocLang at all**, because docling glued them onto
+the front of their own paragraph with no delimiter:
+
+```
+SIGNATURES IN WITNESS WHEREOF the Parties have executed this SOW as of ...
+Telephony Solution The planned telephony solution for use in supporting ...
+```
+
+`_source_clause_titles()` reads the `^N. Title` numbering out of the original Markdown
+instead and uses it as an allowlist, splitting any element that starts with a known title.
+Set `DG_SOURCE` to enable it.
+
+Checked against the source afterwards: **every heading and numbered clause in the document
+is now in the graph, 0 missing.** The Accenture graph went from 178 nodes to **191**.
 
 ### One prompt holds the whole document
 
@@ -292,4 +324,4 @@ whole-contract graph is a question about our design, not about docling-graph.
 ---
 
 docling-graph 1.9.1 · docling 2.120.1 · Python 3.12.13 · macOS arm64 · six contracts ·
-three full pipeline runs · 333 graph nodes · **0 model weights loaded**
+three full pipeline runs · 191 nodes on the largest contract, every section captured · **0 model weights loaded**
