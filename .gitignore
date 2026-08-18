@@ -1,0 +1,14 @@
+in6/
+out6/
+calls6/
+inputs/
+outputs/
+prompts/
+*.dclg
+nodes.csv
+edges.csv
+provenance.json
+venv*/
+__pycache__/
+*.pyc
+.DS_Store
